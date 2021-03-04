@@ -1,17 +1,24 @@
-import nest_asyncio
-import pandas as pd
-nest_asyncio.apply()
+
 
 import os
-from tabulate import tabulate
+import sys
 import copy
 import discord
 import json
+import pandas as pd
 from collections import defaultdict
 from discord.ext import commands
 from dotenv import load_dotenv
 
-file = open("config.json", "r")
+import matplotlib.pyplot as plt
+import numpy as np
+import re
+
+import nltk
+from nltk.corpus import stopwords
+
+stopwords = set(stopwords.words('english')) 
+file = open("inputs/config.json", "r")
 file = json.load(file)
 TOKEN = file['token']
 GUILD_TOKEN = file['guild_token']
@@ -24,21 +31,32 @@ intents.members = True
 members = None
 load_dotenv()
 bot = commands.Bot(intents=intents, command_prefix='!')
+
+blacklist = open("inputs/blacklist.json","r")
+blacklist = json.load(blacklist)
+blacklist = blacklist['filterList']
+
 textChannels = None
+
+minWordLength = 2
 members = defaultdict(int)
 @bot.event
 async def on_ready():
     guild = discord.utils.find(lambda g: str(g.id) == GUILD_TOKEN, bot.guilds)
     global textChannels
-    textChannels = [channel for channel in guild.channels if (channel.type == discord.ChannelType.text)]
+    textChannels = [channel for channel in guild.channels if (channel.type == discord.ChannelType.text) and 
+                   str(channel.id) not in blacklist]
     print(
         f'{bot.user.name} has connected to Discord!',
         f'Server: {guild.name}, Server id: {guild.id}'
     )
+    
+
 @bot.command(name="reset")
 async def reset(ctx):
     global textChannels
-    textChannels = [channel for channel in guild.channels if (channel.type == discord.ChannelType.text)]
+    textChannels = [channel for channel in ctx.guild.channels if (channel.type == discord.ChannelType.text)]
+    await ctx.send("Reset channel parse list to include all channels.")
 @bot.command(name="parseserver")
 async def prepMessages(ctx, arg):
     try:
@@ -77,7 +95,8 @@ async def parseChannel(ctx,arg1,arg2):
     try:
         channelId = int(arg1[2:-1])
         channel = discord.utils.get(ctx.guild.channels, id=channelId)
-        print(channel)
+        global textChannels
+        textChannels = [channel]
         global data
         data = await parseMessages(botResponse, [channel], arg2)
         await botResponse.edit(content=f'Finished parsing {channel.name}! {len(data)} messages parsed')
@@ -147,39 +166,83 @@ async def parseMessages(message,channels,arg):
             await message.edit(content=f'Parsing {channel.name}')# replace by editing msg
             channelMessage = await channel.history(limit=arg).flatten()
         except discord.errors.Forbidden as err:
+            global textChannels
+            textChannels.remove(channel)
             print(f"Skipping {channel.name}")
             continue    
         channelData = channelData.append(await createDataFrame(channelMessage))
-    channelData.to_csv('messages.csv')
+    channelData.to_csv("output/messages.csv")
     return channelData
         
 async def createDataFrame(messages):
     msgData = pd.DataFrame(columns=['channel','content', 'time', 'author'])
     global members
+    global textChannels
+    channels = textChannels
     for msg in messages:
         if msg.author.bot: continue
-            
-        if msg.author in members:
-            members[msg.author] += 1
+        message = [word for word in str(msg.content).split() 
+                   if word not in stopwords and len(word) < minWordLength]
+        if len(message) == 0 :continue
+        user = msg.author
+        channel = msg.channel
+        message = str(msg.content).split()
+                   
+        if user in members:
+            members[user][0][channel] += len(message)
+            members[user][0]['!total'] += len(message)
+            members[user][1] += len(message)
         else:
-            members[msg.author] = 1
-        msgData = msgData.append({'channel':msg.channel.name, 'content': msg.content, 'time': msg.created_at, 'author': msg.author}, ignore_index=True)
+            members[user] = [{channel: 0 for channel in channels}, 0]
+            members[user][0][channel] = len(message)
+            members[user][0]['!total'] = len(message)
+            members[user][1] = len(message)
+        try:
+            msgData = msgData.append({'channel':msg.channel.name, 'content': msg.content, 'time': msg.created_at, 'author': msg.author}, ignore_index=True)
+            
+        except ValueError:
+            print('error')
     return msgData
 
-@bot.command(name="analmsgs")
+@bot.command(name="analyzemsgs")
 async def analyzeMessages(ctx):
-    df = pd.DataFrame(columns=['Name', "Message_Count"])
-    global members
-    for user in members:
-        df = df.append({'Name':user.name, 'Message_Count': members[user]}, ignore_index=True)
-    df = df.sort_values(by=['Message_Count'], ascending=False)
-    df.to_csv('rank.csv')
     
-    await ctx.send(tabulate(df[:10], showindex=False, headers=df.columns))
+    printTotal = False
+    userMsgThreshold = 0
+    channelMsgThreshold=0
+    global textChannels
+    print(textChannels)
+    channels = textChannels
+    channelToUser = {remove_emoji(channel.name): {} for channel in channels}
+    channelToUser['!Total'] = {}
+    
+    for user in members:
+        if members[user][1] >= userMsgThreshold:
+            for channel in members[user][0]:
+                if channel != '!total' and channel in textChannels:
+                    channelName = remove_emoji(channel.name)
+                    # use channelName for channelToUser since it'll print out prettier
+                    # use channel for member since it refers to object channel, not name
+                    channelToUser[channelName][user] = members[user][0][channel]
+            channelToUser['!Total'][user] = members[user][1]
+    data = pd.DataFrame(channelToUser)
+    # sort legend (y-axis) by channel
+    data.loc['Total'] = data.sum()
+    data = data.sort_values(by='Total', ascending=False, axis=1)
+    data = data.sort_values(by='!Total', ascending=False)
+    if not printTotal:
+        data=data.drop('Total',axis=0)
+    data = data.drop(columns=['!Total'])
+    # create another entry in df to sum all message counts for each channel
+    data.plot(kind="bar",stacked=True, figsize=(15,15),colormap='tab20')
+    plt.savefig('output/saved_figure.png')
+    await ctx.send(file=discord.File('output/saved_figure.png'))
+
+    
     
 @bot.command(name="testmsgs")
 async def testMessages(ctx):
-    messages = pd.read_csv("messages.csv")
+    messages = pd.read_csv(os.path.join(script_dir, '../output/messages.csv'))
     members = {}
     sentMessage = await ctx.send(f'0 parsed messages')
     i = 0
@@ -199,6 +262,20 @@ async def testMessages(ctx):
     await ctx.send(f'Top 10 Users: \n{tabulate(df[:10], showindex=False, headers=df.columns)}')
     
     
+    
+    
+def remove_emoji(string):
+    emoji_pattern = re.compile("["
+                           u"\U0001F600-\U0001F64F"  # emoticons
+                           u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+                           u"\U0001F680-\U0001F6FF"  # transport & map symbols
+                           u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+                           u"\U00002702-\U000027B0"
+                           u"\U000024C2-\U0001F251"
+                           "]+", flags=re.UNICODE)
+    return emoji_pattern.sub(r'', string)
+    
+
         
         
 
