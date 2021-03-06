@@ -1,44 +1,49 @@
-
-
 import os
 import sys
+import pandas as pd
 import copy
 import discord
 import json
-import pandas as pd
 from collections import defaultdict
 from discord.ext import commands
 from dotenv import load_dotenv
-
 import matplotlib.pyplot as plt
 import numpy as np
 import re
-
 import nltk
 from nltk.corpus import stopwords
 
-stopwords = set(stopwords.words('english')) 
-file = open("inputs/config.json", "r")
+# Loading bot credentials
+file = open("input/config.json", "r")
 file = json.load(file)
 TOKEN = file['token']
 GUILD_TOKEN = file['guild_token']
 
+# Initializing variables
+stopwords = set(stopwords.words('english')) 
 data = pd.DataFrame(columns=['content', 'time', 'author'])
+members = None
+textChannels = None
 
+# Startup flags
+minWordLength = 2 # Include only words that are >= character length
+preloadBlacklist = True # Exclude channels from a blacklist file
+printTotal = False # Include number of messages in the output
+userMsgThreshold = 0 # Only include users that have >= messages
+channelMsgThreshold= 0 # Only include channels that have >= messages
+#
 intents = discord.Intents.default()
 intents.members = True
 
-members = None
+
 load_dotenv()
 bot = commands.Bot(intents=intents, command_prefix='!')
 
-blacklist = open("inputs/blacklist.json","r")
-blacklist = json.load(blacklist)
-blacklist = blacklist['filterList']
+if(preloadBlacklist):
+    blacklist = open("input/blacklist.json","r")
+    blacklist = json.load(blacklist)
+    blacklist = blacklist['filterList']
 
-textChannels = None
-
-minWordLength = 2
 members = defaultdict(int)
 @bot.event
 async def on_ready():
@@ -51,12 +56,23 @@ async def on_ready():
         f'Server: {guild.name}, Server id: {guild.id}'
     )
     
-
+''' Reinitializes parseable channels to be all channels inside the Discord server
+    Parameters:
+        ctx - context
+    Returns: None
+'''
 @bot.command(name="reset")
 async def reset(ctx):
     global textChannels
     textChannels = [channel for channel in ctx.guild.channels if (channel.type == discord.ChannelType.text)]
     await ctx.send("Reset channel parse list to include all channels.")
+    
+''' Parses the server using channels inside textChannels
+    Paramters:
+        ctx - context
+        arg - number of messages to parse in each channel
+    Return: None
+'''
 @bot.command(name="parseserver")
 async def prepMessages(ctx, arg):
     try:
@@ -73,6 +89,13 @@ async def prepMessages(ctx, arg):
     response = f'Finished! {len(data)} messages parsed'
     await message.edit(content=response)
     
+''' Parses only the channel provided
+    Parameters: 
+        ctx - context
+        arg1 - channel id
+        arg2 - number of messages to parse
+    Return: None
+'''
 @bot.command(name="parsechannel")
 async def parseChannel(ctx,arg1,arg2):
     async def getChannel(channelList):
@@ -109,7 +132,13 @@ async def parseChannel(ctx,arg1,arg2):
     
         
 
-#skips channel for sever prep
+
+''' Removes channel(s) from parseable channels when using parseserver command
+    Paramters: 
+        ctx - context
+        *args - list of channel ids to remove
+    Return: None
+'''
 @bot.command(name="skipchannel")
 async def skipChannel(ctx, *args):
 
@@ -134,7 +163,12 @@ async def skipChannel(ctx, *args):
     await removeChannels(ctx,removeList)
     await printChannels()
 
-    
+''' Verifies if channel exists in parseable channels
+    Parameters:
+        ctx - context
+        args - list of channel ids to remove
+    Returns: List, list of parseable channels
+'''
 async def isChannelValid(ctx,args):
         channelIds = [channel.id for channel in textChannels]
         i = 0
@@ -155,7 +189,13 @@ async def isChannelValid(ctx,args):
         return removeList
         #await removeChannels(ctx,removeList)
     
-                    
+''' Obtains messages from channels,returns dataframe with those messages
+    Parameters:
+        message - context message, keeps the user informed on what channel is being parsed
+        channels - whitelist of channels to parse
+        arg - number of messages to parse within each channel
+    Returns : DataFrame
+'''
 async def parseMessages(message,channels,arg):
     arg = int(arg)
     global members
@@ -173,10 +213,18 @@ async def parseMessages(message,channels,arg):
         channelData = channelData.append(await createDataFrame(channelMessage))
     channelData.to_csv("output/messages.csv")
     return channelData
-        
+
+''' Expects iterable object channelMessages
+    Parameters:
+        messages - iterable messages from Discord API
+    Returns : DataFrame
+'''
 async def createDataFrame(messages):
     msgData = pd.DataFrame(columns=['channel','content', 'time', 'author'])
+    
+    # members = {user: [{channel: message_count}, user_message_count]}
     global members
+    
     global textChannels
     channels = textChannels
     for msg in messages:
@@ -204,12 +252,16 @@ async def createDataFrame(messages):
             print('error')
     return msgData
 
+''' Saves and messages plot/visualization of messages in output/saved_figure.png
+    Parameter: ctx - context
+    Return: None
+'''
 @bot.command(name="analyzemsgs")
 async def analyzeMessages(ctx):
     
-    printTotal = False
-    userMsgThreshold = 0
-    channelMsgThreshold=0
+    global printTotal
+    global userMsgThreshold
+    global channelMsgThreshold
     global textChannels
     print(textChannels)
     channels = textChannels
@@ -226,18 +278,20 @@ async def analyzeMessages(ctx):
                     channelToUser[channelName][user] = members[user][0][channel]
             channelToUser['!Total'][user] = members[user][1]
     data = pd.DataFrame(channelToUser)
-    # sort legend (y-axis) by channel
+    # create a uhhhhhhh boolean for x-axis channels, y-axis user msgs
+    
+    
+    
+    # create a boolean for x-axis users, y-axis channels
     data.loc['Total'] = data.sum()
     data = data.sort_values(by='Total', ascending=False, axis=1)
     data = data.sort_values(by='!Total', ascending=False)
     if not printTotal:
         data=data.drop('Total',axis=0)
     data = data.drop(columns=['!Total'])
-    # create another entry in df to sum all message counts for each channel
     data.plot(kind="bar",stacked=True, figsize=(15,15),colormap='tab20')
     plt.savefig('output/saved_figure.png')
     await ctx.send(file=discord.File('output/saved_figure.png'))
-
     
     
 @bot.command(name="testmsgs")
@@ -259,7 +313,7 @@ async def testMessages(ctx):
     for user in members:
         df = df.append({'Name':user, 'Message_Count': members[user]}, ignore_index=True)
     df = df.sort_values(by=['Message_Count'], ascending=False)
-    await ctx.send(f'Top 10 Users: \n{tabulate(df[:10], showindex=False, headers=df.columns)}')
+    #await ctx.send(f'Top 10 Users: \n{tabulate(df[:10], showindex=False, headers=df.columns)}')
     
     
     
