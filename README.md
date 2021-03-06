@@ -1,4 +1,9 @@
 ## ~ WIP ~
+# What does DiscordAnalytics do?
+* Parse messages in all channels (that the bot has permission to see) in a discord server 
+   * Remove channels from the parsing list using their channel id
+* Parse messages in a single channel
+* Presents that data in a stacked bar plot
 
 Steps to begin: 
 
@@ -11,3 +16,11 @@ Steps to begin:
 Example of output:
 
 ![alt text](https://github.com/KenLHua/DiscordAnalytics/blob/master/saved_figure.png?raw=true))
+
+
+##Todo:
+[] - Label graph output
+[] - Choice of channel on x-axis
+[] - User's favorite words
+[] - Words most often used in the server/channel
+[] - Unit tests/CI with pushes
