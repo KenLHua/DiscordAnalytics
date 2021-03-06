@@ -18,9 +18,13 @@ Example of output:
 ![alt text](https://github.com/KenLHua/DiscordAnalytics/blob/master/saved_figure.png?raw=true))
 
 
-##Todo:
+## Todo:
 [] - Label graph output
+
 [] - Choice of channel on x-axis
+
 [] - User's favorite words
+
 [] - Words most often used in the server/channel
+
 [] - Unit tests/CI with pushes
