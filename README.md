@@ -1,4 +1,7 @@
+## ~ WIP ~
+
 Steps to begin: 
+
 0. Setup a discord bot within the discord dev console
 1. Create a config.json file in /inputs/, with fields:
    {"token" : BOT_TOKEN_STRING, "guild_token": GUILD_TOKEN_STRING}
