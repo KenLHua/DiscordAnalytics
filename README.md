@@ -6,4 +6,5 @@ Steps to begin:
    {"filterList": [CHANNEL_ID_TO_BLACKLIST1,CHANNEL_ID_TO_BLACKLIST2]}
    
 Example of output:
+
 ![alt text](https://github.com/KenLHua/DiscordAnalytics/blob/master/saved_figure.png?raw=true))
